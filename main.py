@@ -39,7 +39,7 @@ def main(argv: List[str]) -> None:
                                help="Set the speed of the solver.\n"
                                # "0: Find exact solution (requires exponential time and memory).\n"
                                     "1: Most precise polynomial approximate algorithm.\n"
-                                    "4: Fastest, linear-time approximate algorithm.")
+                                    "5: Fastest, linear-time approximate algorithm.")
     common_parser.add_argument("input_file", type=argparse.FileType("r"), default=sys.stdin, nargs='?',
                                help="The path to the input file. "
                                     "If absent, the standard input will be used. "
