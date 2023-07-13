@@ -26,13 +26,14 @@ class Rounding(Enum):
 
 class Params:
     def __init__(self, binary_search: bool, knapsack_binary_search: bool, linear_search: bool,
-                 knapsack_pruning: bool, rounding: Rounding = Rounding.ALL, binary_search_iterations: int = 30):
+                 knapsack_pruning: bool, rounding: Rounding, binary_search_iterations: int, no_jit: bool):
         self.linear_search = linear_search
         self.knapsack_binary_search = knapsack_binary_search or self.linear_search
         self.binary_search = binary_search or self.knapsack_binary_search
         self.knapsack_pruning = knapsack_pruning
         self.binary_search_iterations = binary_search_iterations
         self.rounding = rounding
+        self.no_jit = no_jit
 
         # TODO: implement fast pruning
         # self.fast_pruning = fast_pruning
@@ -102,14 +103,16 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[Li
 
 
 def _swiper_floor(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
-    return _swiper_impl(inst, params, floor, inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn)
+    return _swiper_impl(inst, params, floor, inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn,
+                        params.no_jit)
 
 
 def _swiper_ceil(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
-    return _swiper_impl(inst, params, ceil, inst.total_weight / inst.n * (inst.tn - inst.tw) / (1 - inst.tn))
+    return _swiper_impl(inst, params, ceil, inst.total_weight / inst.n * (inst.tn - inst.tw) / (1 - inst.tn),
+                        params.no_jit)
 
 
-def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low) -> Tuple[Status, Optional[List[int]]]:
+def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) -> Tuple[Status, Optional[List[int]]]:
     """
     :param rnd: rounding function
     :param x_low: lower bound on the optimal value of X
@@ -137,7 +140,8 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low) -> Tuple[S
             sum_t_x_mid = sum(t_mid)
 
             best_threshold_set, best_threshold_set_t = knapsack(inst.weights, t_mid, inst.threshold_weight,
-                                                                upper_bound=floor(sum_t_x_mid * inst.tn) + 1)
+                                                                upper_bound=floor(sum_t_x_mid * inst.tn) + 1,
+                                                                no_jit=no_jit)
 
             if best_threshold_set_t < inst.tn * sum_t_x_mid:
                 x_low = x_mid
@@ -154,7 +158,8 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low) -> Tuple[S
             sum_t_prime = sum(t_prime)
             holders = [i for i in range(inst.n) if t_prime[i] > 0]
             best_threshold_set, best_threshold_set_t = knapsack(inst.weights, t_prime, inst.threshold_weight,
-                                                                upper_bound=floor(sum_t_prime * inst.tn) + 1)
+                                                                upper_bound=floor(sum_t_prime * inst.tn) + 1,
+                                                                no_jit=no_jit)
             if best_threshold_set == [] or sum_t_prime == 0:
                 break
 
@@ -169,12 +174,12 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low) -> Tuple[S
                     t_prime[i] = rnd(inst.weights[i] / x_prime)
 
     if params.knapsack_pruning:
-        t_best = prune(inst, t_best, rnd)
+        t_best = prune(inst, t_best, no_jit)
 
     return Status.VALID, t_best
 
 
-def prune(inst: WeightRestriction, solution: List[int], rnd) -> List[int]:
+def prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) -> List[int]:
     """Return a solution corresponding to the pruned version the input list."""
 
     # The index of the party with the maximum weight
@@ -185,7 +190,8 @@ def prune(inst: WeightRestriction, solution: List[int], rnd) -> List[int]:
         return [1 if i == i_max else 0 for i in range(inst.n)]
 
     best_threshold_set, best_threshold_set_t = knapsack(inst.weights, solution, inst.threshold_weight,
-                                                        upper_bound=floor(sum(solution) * inst.tn) + 1)
+                                                        upper_bound=floor(sum(solution) * inst.tn) + 1,
+                                                        no_jit=no_jit)
 
     if best_threshold_set_t > inst.tn * sum(solution):
         raise Exception("Solution is not valid")

@@ -2,12 +2,13 @@
 
 import argparse
 import logging
+import math
 import sys
 from fractions import Fraction
 from typing import List
 
-from _archive.jit_fractions import jit_fraction
-from solver.solver import solve, Params, Status, Rounding
+from solver import solve, Params, Status, Rounding
+from solver.knapsack import MAX_INT_64, overflow_error
 from solver.wr import WeightRestriction
 from solver.wq import WeightQualification
 
@@ -32,15 +33,22 @@ def main(argv: List[str]) -> None:
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("-f", "--float", action="store_true",
                                help="Use floating point numbers instead of exact representations of rational numbers. "
-                                    "This may lead to slightly incorrect results due to rounding errors.")
+                                    "This implementation may occasionally produce incorrect results or even crash due "
+                                    "to the rounding errors. It is also not guaranteed to produce the same results "
+                                    "on different platforms.")
+    common_parser.add_argument("--no-jit", action="store_true",
+                               help="Do not use JIT compilation. This guarantees that there are no integer overflows, "
+                                    "but may result in a significant performance degradation.")
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False,
                                help="Set this flag to enable verbose logging.")
-    common_parser.add_argument("--speed", type=int, default=5, choices=range(0, 11), metavar="[0-10]",
+    common_parser.add_argument("--speed", type=int, default=5, choices=range(1, 11), metavar="[1-10]",
                                help="Set the speed of the solver.\n"
                                     # "0: Find exact solution (requires exponential time and memory).\n"
                                     "1: Most precise polynomial approximate algorithm.\n"
-                                    "5: Recommended for most instance sizes.\n"
-                                    "10: Fastest, linear-time approximate algorithm.")
+                                    "3: Recommended for small inputs (n < 1000).\n"
+                                    "5: Recommended for most inputs.\n"
+                                    "7: Maximum value at which pruning is performed.\n"
+                                    "10: Fastest, linear-time approximate algorithm, without pruning.")
     common_parser.add_argument("input_file", type=argparse.FileType("r"), default=sys.stdin, nargs='?',
                                help="The path to the input file. "
                                     "If absent, the standard input will be used. "
@@ -88,6 +96,12 @@ def main(argv: List[str]) -> None:
         args.tw = float(args.tw)
         args.tn = float(args.tn)
         weights = [float(w) for w in weights]
+    else:
+        # Convert weights to integers
+        lcm = 1
+        for w in weights + [Fraction(args.tw), Fraction(args.tn)]:
+            lcm = lcm * w.denominator // math.gcd(lcm, w.denominator)
+        weights = [int(w * lcm) for w in weights]
 
     if args.solver in swiper_aliases:
         args.solver = "swiper"
@@ -105,21 +119,23 @@ def main(argv: List[str]) -> None:
 
     floor_status, floor_solution = solve(inst, Params(
         binary_search=args.speed <= 9,
-        knapsack_pruning=args.speed <= 8,
-        knapsack_binary_search=args.speed <= 6,
-        linear_search=args.speed <= 5,
+        knapsack_pruning=args.speed <= 7,
+        knapsack_binary_search=args.speed <= 5,
+        linear_search=args.speed <= 4,
         binary_search_iterations=30,
         rounding=Rounding.FLOOR,
+        no_jit=args.no_jit,
     ))
 
     ceil_status, ceil_solution = solve(inst, Params(
-        binary_search=args.speed <= 5,
+        binary_search=args.speed <= 6,
         # Knapsack can be very slow for the ceiling distribution due to a bad starting distribution.
-        knapsack_pruning=args.speed <= 4,
-        knapsack_binary_search=args.speed <= 2,
+        knapsack_pruning=args.speed <= 5,
+        knapsack_binary_search=args.speed <= 3,
         linear_search=args.speed <= 1,
         binary_search_iterations=30,
         rounding=Rounding.CEIL,
+        no_jit=args.no_jit,
     ))
 
     status, solution = ((floor_status, floor_solution) if sum(floor_solution) < sum(ceil_solution)

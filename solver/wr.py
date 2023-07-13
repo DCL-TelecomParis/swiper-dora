@@ -6,7 +6,10 @@ class WeightRestriction:
 
     """Represents an instance of the Weight Restriction problem."""
 
-    def __init__(self, weights: List[Union[Fraction, float]], tw: Union[Fraction, float], tn: Union[Fraction, float]):
+    def __init__(self,
+                 weights: List[Union[Fraction, float, int]],
+                 tw: Union[Fraction, float],
+                 tn: Union[Fraction, float]):
         """
         Create a new instance.
 
