@@ -2,19 +2,37 @@ from enum import Enum
 from math import floor, ceil
 from typing import Tuple, List, Optional, Union
 
-from solver.knapsack import knapsack
+from solver.knapsack import knapsack, knapsack_upper_bound
 from solver.wq import WeightQualification
 from solver.wr import WeightRestriction
 
 
+class Rounding(Enum):
+
+    """Represents the rounding method used by the solver."""
+
+    FLOOR = "floor"
+    """round down the weights of the parties"""
+
+    CEIL = "ceil"
+    """round up the weights of the parties"""
+
+    BEST_BOUND = "best_bound"
+    """round with the scheme that gives the best theoretical upper bound on the solution"""
+
+    ALL = "both"
+    """round with all rounding schemes and return the best solution"""
+
+
 class Params:
     def __init__(self, binary_search: bool, knapsack_binary_search: bool, linear_search: bool,
-                 knapsack_pruning: bool, binary_search_iterations: int = 30):
+                 knapsack_pruning: bool, rounding: Rounding = Rounding.ALL, binary_search_iterations: int = 30):
         self.linear_search = linear_search
         self.knapsack_binary_search = knapsack_binary_search or self.linear_search
         self.binary_search = binary_search or self.knapsack_binary_search
         self.knapsack_pruning = knapsack_pruning
         self.binary_search_iterations = binary_search_iterations
+        self.rounding = rounding
 
         # TODO: implement fast pruning
         # self.fast_pruning = fast_pruning
@@ -63,18 +81,48 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[Li
 
     assert 1 > inst.tn > inst.tw > 0
 
-    # x_low is the lower bound on the optimal value of X.
-    x_low = inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn
+    if params.rounding == Rounding.FLOOR:
+        return _swiper_floor(inst, params)
+    elif params.rounding == Rounding.CEIL:
+        return _swiper_ceil(inst, params)
+    elif params.rounding == Rounding.BEST_BOUND:
+        if inst.tw < 0.5:
+            return _swiper_floor(inst, params)
+        else:
+            return _swiper_ceil(inst, params)
+    elif params.rounding == Rounding.ALL:
+        status_floor, sol_floor = _swiper_floor(inst, params)
+        status_ceil, sol_ceil = _swiper_ceil(inst, params)
+        if sum(sol_floor) < sum(sol_ceil):
+            return status_floor, sol_floor
+        else:
+            return status_ceil, sol_ceil
+    else:
+        raise ValueError(f"Unknown rounding method {params.rounding}")
+
+
+def _swiper_floor(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
+    return _swiper_impl(inst, params, floor, inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn)
+
+
+def _swiper_ceil(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
+    return _swiper_impl(inst, params, ceil, inst.total_weight / inst.n * (inst.tn - inst.tw) / (1 - inst.tn))
+
+
+def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low) -> Tuple[Status, Optional[List[int]]]:
+    """
+    :param rnd: rounding function
+    :param x_low: lower bound on the optimal value of X
+    """
 
     if params.binary_search:
         x_high = max(inst.weights)
 
         for _ in range(params.binary_search_iterations):  # TODO: come up with a good stopping condition
             x_mid = (x_high + x_low) / 2
-            t_mid = [floor(inst.weights[i] / x_mid) for i in range(inst.n)]
-            sum_t_x_mid = sum(t_mid)
+            t_mid = [rnd(inst.weights[i] / x_mid) for i in range(inst.n)]
 
-            if inst.threshold_weight / x_mid < inst.tn * sum_t_x_mid:
+            if knapsack_upper_bound(inst.weights, t_mid, inst.threshold_weight) < inst.tn * sum(t_mid):
                 x_low = x_mid
             else:
                 x_high = x_mid
@@ -85,7 +133,7 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[Li
 
         for _ in range(params.binary_search_iterations):  # TODO: come up with a good stopping condition
             x_mid = (x_high + x_low) / 2
-            t_mid = [floor(inst.weights[i] / x_mid) for i in range(inst.n)]
+            t_mid = [rnd(inst.weights[i] / x_mid) for i in range(inst.n)]
             sum_t_x_mid = sum(t_mid)
 
             best_threshold_set, best_threshold_set_t = knapsack(inst.weights, t_mid, inst.threshold_weight,
@@ -97,7 +145,7 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[Li
                 x_high = x_mid
 
     # The best solution found so far
-    t_best = [floor(inst.weights[i] / x_low) for i in range(inst.n)]
+    t_best = [rnd(inst.weights[i] / x_low) for i in range(inst.n)]
 
     # Finish the search going through the rest of relevant values of X one by one
     if params.linear_search:
@@ -118,15 +166,15 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[Li
                 if inst.weights[i] / t_prime[i] == x_prime:
                     t_prime[i] -= 1
                 else:
-                    t_prime[i] = floor(inst.weights[i] / x_prime)
+                    t_prime[i] = rnd(inst.weights[i] / x_prime)
 
     if params.knapsack_pruning:
-        t_best = prune(inst, t_best)
+        t_best = prune(inst, t_best, rnd)
 
     return Status.VALID, t_best
 
 
-def prune(inst: WeightRestriction, solution: List[int]) -> List[int]:
+def prune(inst: WeightRestriction, solution: List[int], rnd) -> List[int]:
     """Return a solution corresponding to the pruned version the input list."""
 
     # The index of the party with the maximum weight

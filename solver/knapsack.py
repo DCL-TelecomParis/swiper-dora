@@ -2,8 +2,11 @@ from fractions import Fraction
 from typing import List, Union, Tuple
 
 
-def knapsack(weights: List[Union[Fraction, float]], profits: List[int], capacity: Union[Fraction, float],
-             upper_bound: int) -> Tuple[List[int], int]:
+def knapsack(
+        weights: List[Union[Fraction, float]],
+        profits: List[int],
+        capacity: Union[Fraction, float],
+        upper_bound: int) -> Tuple[List[int], int]:
     """
     Return the optimal set of items for the given knapsack problem.
 
@@ -51,7 +54,7 @@ def sanity_knapsack(
         c: Union[Fraction, float],
         u: int
 ) -> int:
-    """ Solve knapsack using dynamic programming by profits. """
+    """ Solve knapsack using dynamic programming by profits."""
     n = len(w)
     assert len(p) == n
 
@@ -65,3 +68,27 @@ def sanity_knapsack(
 
     # Solution is the maximum index of y that does not surpass capacity
     return max([q for q in range(u + 1) if y[q] <= c])
+
+
+def knapsack_upper_bound(
+    weights: List[Union[Fraction, float]],
+    profits: List[int],
+    capacity: Union[Fraction, float],
+) -> int:
+    """Returns an upper bound for the knapsack solution in quasilinear time."""
+    n = len(weights)
+    assert len(profits) == n
+
+    descending_efficiency_parties = sorted(range(n), key=lambda i: profits[i] / weights[i], reverse=True)
+
+    profit = 0
+    for party in descending_efficiency_parties:
+        if capacity >= weights[party]:
+            capacity -= weights[party]
+            profit += profits[party]
+        else:
+            profit += profits[party] * (capacity / weights[party])
+            break
+
+    return profit
+

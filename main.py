@@ -7,7 +7,7 @@ from fractions import Fraction
 from typing import List
 
 from _archive.jit_fractions import jit_fraction
-from solver.solver import solve, Params, Status
+from solver.solver import solve, Params, Status, Rounding
 from solver.wr import WeightRestriction
 from solver.wq import WeightQualification
 
@@ -35,11 +35,12 @@ def main(argv: List[str]) -> None:
                                     "This may lead to slightly incorrect results due to rounding errors.")
     common_parser.add_argument("-v", "--verbose", action="store_true", default=False,
                                help="Set this flag to enable verbose logging.")
-    common_parser.add_argument("--speed", type=int, choices=[1, 2, 3, 4, 5], default=1,
+    common_parser.add_argument("--speed", type=int, default=5, choices=range(0, 11), metavar="[0-10]",
                                help="Set the speed of the solver.\n"
-                               # "0: Find exact solution (requires exponential time and memory).\n"
+                                    # "0: Find exact solution (requires exponential time and memory).\n"
                                     "1: Most precise polynomial approximate algorithm.\n"
-                                    "5: Fastest, linear-time approximate algorithm.")
+                                    "5: Recommended for most instance sizes.\n"
+                                    "10: Fastest, linear-time approximate algorithm.")
     common_parser.add_argument("input_file", type=argparse.FileType("r"), default=sys.stdin, nargs='?',
                                help="The path to the input file. "
                                     "If absent, the standard input will be used. "
@@ -102,18 +103,31 @@ def main(argv: List[str]) -> None:
     logger.info("Total weight: %s", inst.total_weight)
     logger.info("Threshold weight: %s", inst.threshold_weight)
 
-    status, solution = solve(inst, Params(
-        binary_search=args.speed <= 4,
-        knapsack_pruning=args.speed <= 3,
+    floor_status, floor_solution = solve(inst, Params(
+        binary_search=args.speed <= 9,
+        knapsack_pruning=args.speed <= 8,
+        knapsack_binary_search=args.speed <= 6,
+        linear_search=args.speed <= 5,
+        binary_search_iterations=30,
+        rounding=Rounding.FLOOR,
+    ))
+
+    ceil_status, ceil_solution = solve(inst, Params(
+        binary_search=args.speed <= 5,
+        # Knapsack can be very slow for the ceiling distribution due to a bad starting distribution.
+        knapsack_pruning=args.speed <= 4,
         knapsack_binary_search=args.speed <= 2,
         linear_search=args.speed <= 1,
         binary_search_iterations=30,
+        rounding=Rounding.CEIL,
     ))
+
+    status, solution = ((floor_status, floor_solution) if sum(floor_solution) < sum(ceil_solution)
+                        else (ceil_status, ceil_solution))
 
     if status == Status.NONE:
         print("No solution found within the time limit.")
         return
-
     if status == Status.OPTIMAL:
         print("Optimal solution found:")
     elif status == Status.VALID:
