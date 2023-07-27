@@ -163,7 +163,7 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
             if best_threshold_set == [] or sum_t_prime == 0:
                 break
 
-            if best_threshold_set_t <= inst.tn * sum_t_prime:
+            if best_threshold_set_t < inst.tn * sum_t_prime:
                 t_best = t_prime.copy()
 
             x_prime = min([inst.weights[i] / t_prime[i] for i in best_threshold_set])
