@@ -54,7 +54,7 @@ class Status(Enum):
     """returned if the solver did not find any solution within the timeout"""
 
 
-def solve(inst: Union[WeightRestriction,WeightQualification], params: Params) -> Tuple[Status, Optional[List[int]]]:
+def solve(inst: Union[WeightRestriction, WeightQualification], params: Params) -> Tuple[Status, Optional[List[int]]]:
     """
     Solve the Weight Restriction or Weight Qualification problem.
     """
@@ -193,7 +193,7 @@ def prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) ->
                                                         upper_bound=floor(sum(solution) * inst.tn) + 1,
                                                         no_jit=no_jit)
 
-    if best_threshold_set_t > inst.tn * sum(solution):
+    if best_threshold_set_t >= inst.tn * sum(solution):
         raise Exception("Solution is not valid")
     assert best_threshold_set
 
@@ -203,11 +203,11 @@ def prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) ->
 
     # We distribute tickets to the other users until the total number is ceil(best_threshold_set_t / inst.tn),
     # making sure that each user gets at most the number of tickets it got in the solution
-    while sum(pruned) < ceil(best_threshold_set_t / inst.tn):
+    while sum(pruned) < smallest_greater_integer(best_threshold_set_t / inst.tn):
         # recipients are the users that have fewer tickets than the solution and are not in best_threshold_set
         recipients = [i for i in range(inst.n) if pruned[i] < solution[i] and i not in best_threshold_set]
 
-        tickets_to_distribute = ceil(best_threshold_set_t / inst.tn) - sum(pruned)
+        tickets_to_distribute = smallest_greater_integer(best_threshold_set_t / inst.tn) - sum(pruned)
 
         if tickets_to_distribute >= len(recipients):
             for i in recipients:
@@ -218,3 +218,8 @@ def prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) ->
                 pruned[i] += 1
 
     return pruned
+
+
+def smallest_greater_integer(x) -> int:
+    """Return the smallest integer greater than x."""
+    return ceil(x) if x % 1 != 0 else int(x) + 1
