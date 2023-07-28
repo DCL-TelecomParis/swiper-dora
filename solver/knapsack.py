@@ -25,6 +25,9 @@ def knapsack(
     Return the optimal set of items for the given knapsack problem.
 
     Takes time O(len(weights) * upper_bound).
+
+    NB: the memory footprint can be reduced from O(len(weights) * upper_bound) to O(len(weights) + upper_bound).
+    See: Section 3.3 of "Knapsack problems" by Pisinger, D., & Toth, P. (1998)
     """
     assert len(weights) > 0
 
@@ -199,7 +202,13 @@ def knapsack_upper_bound(
     profits: List[int],
     capacity: Union[Fraction, float, int],
 ) -> int:
-    """Returns an upper bound for the knapsack solution in quasilinear time."""
+    """
+    Returns an upper bound for the knapsack solution in quasilinear time.
+
+    NB: this upper bound can be computed in linear time using a slightly more complicated algorithm.
+    See: Section 3.1 of "Knapsack problems" by Pisinger, D., & Toth, P. (1998)
+    """
+
     n = len(weights)
     assert len(profits) == n
 
