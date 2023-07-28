@@ -55,7 +55,7 @@ def knapsack(
         capacity = int(capacity)
 
         # For small instances, just use the python implementation, without JIT
-        if upper_bound * len(weights) < 50_000_000:
+        if upper_bound * len(weights) < 1_000_000:
             return _knapsack_impl(weights, profits, capacity, upper_bound)
 
         # Make sure that all integers fit into 64 bits to avoid overflows
