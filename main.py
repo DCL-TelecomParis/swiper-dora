@@ -46,9 +46,12 @@ def main(argv: List[str]) -> None:
                                     # "0: Find exact solution (requires exponential time and memory).\n"
                                     "1: Most precise polynomial approximate algorithm.\n"
                                     "3: Recommended for small inputs (n < 1000).\n"
-                                    "5: Recommended for most inputs.\n"
-                                    "7: Maximum value at which pruning is performed.\n"
-                                    "10: Fastest, linear-time approximate algorithm, without pruning.")
+                                    "5: Recommended for medium-size inputs (n < 50'000). "
+                                    "O(n^2 log n / |tn - tw|) time complexity.\n"
+                                    "7: Maximum value at which pruning is performed. "
+                                    "O(n^2 / |tn - tw|) time complexity.\n"
+                                    "10: Fastest, linear-time approximate algorithm, without pruning. "
+                                    "O(n) time complexity.")
     common_parser.add_argument("input_file", type=argparse.FileType("r"), default=sys.stdin, nargs='?',
                                help="The path to the input file. "
                                     "If absent, the standard input will be used. "
@@ -121,22 +124,23 @@ def main(argv: List[str]) -> None:
         binary_search=args.speed <= 9,
         knapsack_pruning=args.speed <= 7,
         knapsack_binary_search=args.speed <= 5,
-        linear_search=args.speed <= 4,
+        linear_search=args.speed <= 3,
         binary_search_iterations=30,
         rounding=Rounding.FLOOR,
         no_jit=args.no_jit,
     ))
+    logger.info("Floor solution: %s", sum(floor_solution))
 
     ceil_status, ceil_solution = solve(inst, Params(
         binary_search=args.speed <= 6,
-        # Knapsack can be very slow for the ceiling distribution due to a bad starting distribution.
-        knapsack_pruning=args.speed <= 5,
-        knapsack_binary_search=args.speed <= 3,
+        knapsack_pruning=args.speed <= 4,
+        knapsack_binary_search=args.speed <= 2,
         linear_search=args.speed <= 1,
         binary_search_iterations=30,
         rounding=Rounding.CEIL,
         no_jit=args.no_jit,
     ))
+    logger.info("Ceiling solution: %s", sum(ceil_solution))
 
     status, solution = ((floor_status, floor_solution) if sum(floor_solution) < sum(ceil_solution)
                         else (ceil_status, ceil_solution))
