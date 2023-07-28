@@ -160,18 +160,39 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
             best_threshold_set, best_threshold_set_t = knapsack(inst.weights, t_prime, inst.threshold_weight,
                                                                 upper_bound=floor(sum_t_prime * inst.tn) + 1,
                                                                 no_jit=no_jit)
-            if best_threshold_set == [] or sum_t_prime == 0:
-                break
 
             if best_threshold_set_t < inst.tn * sum_t_prime:
                 t_best = t_prime.copy()
 
-            x_prime = min([inst.weights[i] / t_prime[i] for i in best_threshold_set])
-            for i in holders:
-                if inst.weights[i] / t_prime[i] == x_prime:
-                    t_prime[i] -= 1
-                else:
+            if rnd == floor:
+                if all(t_prime[i] == 0 for i in best_threshold_set):
+                    # Cannot further decrease the number of tickets.
+                    break
+
+                x_prime = min([inst.weights[i] / t_prime[i]
+                               for i in best_threshold_set
+                               if t_prime[i] > 0])
+
+                # Trying X equal to x_prime + EPS, where EPS is infinitesimally small.
+                for i in holders:
+                    if inst.weights[i] / t_prime[i] == x_prime:
+                        t_prime[i] -= 1
+                    else:
+                        t_prime[i] = rnd(inst.weights[i] / x_prime)
+            elif rnd == ceil:
+                # Cannot further decrease the number of tickets with the ceiling rounding.
+                if all(t_prime[i] == 1 for i in best_threshold_set):
+                    break
+
+                x_prime = min([inst.weights[i] / (t_prime[i] - 1)
+                               for i in best_threshold_set
+                               if t_prime[i] > 1])
+
+                # Trying X equal to x_prime.
+                for i in holders:
                     t_prime[i] = rnd(inst.weights[i] / x_prime)
+            else:
+                raise ValueError(f"Rounding function not supported by the linear search: {rnd}")
 
     if params.knapsack_pruning:
         t_best = prune(inst, t_best, no_jit)
