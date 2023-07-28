@@ -95,16 +95,19 @@ def main(argv: List[str]) -> None:
 
     weights = parse_input(args.input_file.read())
 
+    # Help the IDE determine the types
+    args.tw = Fraction(args.tw)
+    args.tn = Fraction(args.tn)
+
     if args.float:
         args.tw = float(args.tw)
         args.tn = float(args.tn)
         weights = [float(w) for w in weights]
     else:
         # Convert weights to integers
-        lcm = 1
-        for w in weights + [Fraction(args.tw), Fraction(args.tn)]:
-            lcm = lcm * w.denominator // math.gcd(lcm, w.denominator)
-        weights = [int(w * lcm) for w in weights]
+        denominator_lcm = lcm(w.denominator for w in weights + [args.tw, args.tn])
+        numerator_gcd = gcd(w.numerator for w in weights)
+        weights = [int(w * denominator_lcm // numerator_gcd) for w in weights]
 
     if args.solver in swiper_aliases:
         args.solver = "swiper"
@@ -158,6 +161,20 @@ def main(argv: List[str]) -> None:
     assert solution is not None
     logger.info(solution)
     print(f"Total tickets allocated: {sum(solution)}.")
+
+
+def lcm(xs):
+    res = 1
+    for x in xs:
+        res = res * x // math.gcd(res, x)
+    return res
+
+
+def gcd(xs):
+    res = 0
+    for x in xs:
+        res = math.gcd(res, x)
+    return res
 
 
 if __name__ == '__main__':
