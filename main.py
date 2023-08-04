@@ -65,19 +65,12 @@ def main(argv: List[str]) -> None:
     )
 
     common_parser = argparse.ArgumentParser(add_help=False)
-    common_parser.add_argument("-f", "--float", action="store_true",
-                               help="Use floating point numbers instead of exact representations of rational numbers. "
-                                    "This implementation may occasionally produce incorrect results or even crash due "
-                                    "to the rounding errors. It is also not guaranteed to produce the same results "
-                                    "on different platforms.")
-    common_parser.add_argument("--no-jit", action="store_true",
-                               help="Do not use JIT compilation. This guarantees that there are no integer overflows, "
-                                    "but may result in a significant performance degradation.")
-    common_parser.add_argument("-v", "--verbose", action="store_true", default=False,
-                               help="Set this flag to enable verbose logging.")
-    common_parser.add_argument("-vv", "--very-verbose", action="store_true", default=False,
-                               help="Set this flag to enable very verbose logging.")
-    common_parser.add_argument("--speed", type=int, default=5, choices=range(1, 11), metavar="[1-10]",
+    common_parser.add_argument("input_file", type=argparse.FileType("r"), default=sys.stdin, nargs='?',
+                               help="The path to the input file. "
+                                    "If absent, the standard input will be used. "
+                                    "The input consists of weights of parties separated by any whitespaces. "
+                                    "Rational numbers are accepted.")
+    common_parser.add_argument("-s", "--speed", type=int, default=5, choices=range(1, 11), metavar="[1-10]",
                                help="Set the speed of the solver.\n"
                                     # "0: Find exact solution (requires exponential time and memory).\n"
                                     "1: Most precise polynomial approximate algorithm.\n"
@@ -94,7 +87,7 @@ def main(argv: List[str]) -> None:
                                     "1 billion GAS roughly corresponds to 1 second of computation. "
                                     "For convenience, suffixes M (1e6) and B (1e9) are supported. "
                                     "Examples: 1.5e9, 10B, 1M.")
-    common_parser.add_argument("--soft-memory-limit", type=str, default=None, metavar="BYTES",
+    common_parser.add_argument("-m", "--soft-memory-limit", type=str, default=None, metavar="BYTES",
                                help="Specifies the maximum amount of memory allocated by the knapsack solver in bytes. "
                                     "When a knapsack solver instance may exceed this limit, it will not be called. "
                                     "This decision is deterministic and platform-independent. "
@@ -102,11 +95,18 @@ def main(argv: List[str]) -> None:
                                     "depends on the Python garbage collector. "
                                     "For convenience, suffixes K (1e3), M (1e6), G (1e9) are supported. "
                                     "Examples: 1.5e9, 10G, 1M.")
-    common_parser.add_argument("input_file", type=argparse.FileType("r"), default=sys.stdin, nargs='?',
-                               help="The path to the input file. "
-                                    "If absent, the standard input will be used. "
-                                    "The input consists of weights of parties separated by any whitespaces. "
-                                    "Rational numbers are accepted.")
+    common_parser.add_argument("--float", action="store_true",
+                               help="Use floating point numbers instead of exact representations of rational numbers. "
+                                    "This implementation may occasionally produce incorrect results or even crash due "
+                                    "to the rounding errors. It is also not guaranteed to produce the same results "
+                                    "on different platforms.")
+    common_parser.add_argument("--no-jit", action="store_true",
+                               help="Do not use JIT compilation. This guarantees that there are no integer overflows, "
+                                    "but may result in a significant performance degradation.")
+    common_parser.add_argument("-v", "--verbose", action="store_true", default=False,
+                               help="Set this flag to enable verbose logging.")
+    common_parser.add_argument("-vv", "--very-verbose", action="store_true", default=False,
+                               help="Set this flag to enable very verbose logging.")
 
     subparsers = parser.add_subparsers(title="solver", required=True, dest="solver")
 
