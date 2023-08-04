@@ -87,6 +87,9 @@ def main(argv: List[str]) -> None:
                                     "1 billion GAS roughly corresponds to 1 second of computation. "
                                     "For convenience, suffixes M (1e6) and B (1e9) are supported. "
                                     "Examples: 1.5e9, 10B, 1M.")
+    common_parser.add_argument("-r", "--rounding", type=str, choices=["floor", "ceil", "both"], default="both",
+                               help="The rounding strategy to use. "
+                                    "By default, both strategies are used and the best result is returned.")
     common_parser.add_argument("-m", "--soft-memory-limit", type=str, default=None, metavar="BYTES",
                                help="Specifies the maximum amount of memory allocated by the knapsack solver in bytes. "
                                     "When a knapsack solver instance may exceed this limit, it will not be called. "
@@ -194,36 +197,46 @@ def main(argv: List[str]) -> None:
     logger.info("Gas limit: %s", gas_limit)
     logger.info("Soft memory limit: %s", soft_memory_limit)
 
-    ceil_status, ceil_solution, ceil_gas_usage = solve(inst, Params(
-        binary_search=args.speed <= 6,
-        knapsack_pruning=args.speed <= 4,
-        knapsack_binary_search=args.speed <= 2,
-        linear_search=args.speed <= 1,
-        binary_search_iterations=30,
-        rounding=Rounding.CEIL,
-        no_jit=args.no_jit,
-        gas_limit=gas_limit // 2,
-        soft_memory_limit=soft_memory_limit,
-    ))
-    logger.info("Ceiling solution: %s", sum(ceil_solution))
-    logger.info("Gas expanded by the ceiling solution: %s", ceil_gas_usage)
+    ceil_status = Status.NONE
+    ceil_solution = []
+    ceil_gas_usage = 0
+    if args.rounding in ["ceil", "both"]:
+        ceil_status, ceil_solution, ceil_gas_usage = solve(inst, Params(
+            binary_search=args.speed <= 6,
+            knapsack_pruning=args.speed <= 4,
+            knapsack_binary_search=args.speed <= 2,
+            linear_search=args.speed <= 1,
+            binary_search_iterations=30,
+            rounding=Rounding.CEIL,
+            no_jit=args.no_jit,
+            gas_limit=gas_limit // 2,
+            soft_memory_limit=soft_memory_limit,
+        ))
+        logger.info("Ceiling solution: %s", sum(ceil_solution))
+        logger.info("Gas expanded by the ceiling solution: %s", ceil_gas_usage)
 
-    floor_status, floor_solution, floor_gas_usage = solve(inst, Params(
-        binary_search=args.speed <= 9,
-        knapsack_pruning=args.speed <= 7,
-        knapsack_binary_search=args.speed <= 5,
-        linear_search=args.speed <= 3,
-        binary_search_iterations=30,
-        rounding=Rounding.FLOOR,
-        no_jit=args.no_jit,
-        gas_limit=gas_limit - ceil_gas_usage,
-        soft_memory_limit=soft_memory_limit,
-    ))
-    logger.info("Floor solution: %s", sum(floor_solution))
-    logger.info("Gas expanded by the floor solution: %s", floor_gas_usage)
+    floor_status = Status.NONE
+    floor_solution = []
+    floor_gas_usage = 0
+    if args.rounding in ["floor", "both"]:
+        floor_status, floor_solution, floor_gas_usage = solve(inst, Params(
+            binary_search=args.speed <= 9,
+            knapsack_pruning=args.speed <= 7,
+            knapsack_binary_search=args.speed <= 5,
+            linear_search=args.speed <= 3,
+            binary_search_iterations=30,
+            rounding=Rounding.FLOOR,
+            no_jit=args.no_jit,
+            gas_limit=gas_limit - ceil_gas_usage,
+            soft_memory_limit=soft_memory_limit,
+        ))
+        logger.info("Floor solution: %s", sum(floor_solution))
+        logger.info("Gas expanded by the floor solution: %s", floor_gas_usage)
 
-    status, solution = ((floor_status, floor_solution) if sum(floor_solution) < sum(ceil_solution)
-                        else (ceil_status, ceil_solution))
+    status, solution_sum, solution = min(
+        (floor_status, sum(floor_solution), floor_solution),
+        (ceil_status, sum(ceil_solution), ceil_solution),
+    )
 
     if status == Status.NONE:
         print("No solution found within the time limit.")

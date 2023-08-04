@@ -83,6 +83,11 @@ class Status(Enum):
     NONE = 3
     """returned if the solver did not find any solution within the timeout"""
 
+    def __lt__(self, other):
+        if self.__class__ is other.__class__:
+            return self.value < other.value
+        return NotImplemented
+
 
 def solve(inst: Union[WeightRestriction, WeightQualification], params: Params) -> Tuple[Status, List[int], int]:
     """
