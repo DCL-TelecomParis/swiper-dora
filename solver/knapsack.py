@@ -35,9 +35,6 @@ def knapsack(
         return _knapsack_impl(weights, profits, capacity, upper_bound)
 
     if isinstance(weights[0], float):
-        # For small instances, just use the python implementation, without JIT
-        if upper_bound * len(weights) < 50_000_000:
-            return _knapsack_impl(weights, profits, capacity, upper_bound)
         assert isinstance(capacity, float)
 
         # Call the JIT-compiled function
@@ -54,10 +51,6 @@ def knapsack(
                     capacity = int(capacity * (capacity.denominator // gcd))
         capacity = int(capacity)
 
-        # For small instances, just use the python implementation, without JIT
-        if upper_bound * len(weights) < 1_000_000:
-            return _knapsack_impl(weights, profits, capacity, upper_bound)
-
         # Make sure that all integers fit into 64 bits to avoid overflows
         if sum(weights) > MAX_INT_64 or sum(profits) > MAX_INT_64 or capacity > MAX_INT_64:
             raise overflow_error
@@ -68,10 +61,6 @@ def knapsack(
 
     if isinstance(weights[0], Fraction):
         assert isinstance(capacity, Fraction)
-
-        # For small instances, just use the python implementation, without JIT
-        if upper_bound * len(weights) < 10_000_000:
-            return _knapsack_impl(weights, profits, capacity, upper_bound)
 
         # Normalize the weights and the capacity to integers
         lcm = capacity.denominator
