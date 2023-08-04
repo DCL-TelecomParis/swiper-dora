@@ -1,3 +1,5 @@
+import logging
+import math
 from enum import Enum
 from math import floor, ceil
 from typing import Tuple, List, Optional, Union
@@ -8,7 +10,6 @@ from solver.wr import WeightRestriction
 
 
 class Rounding(Enum):
-
     """Represents the rounding method used by the solver."""
 
     FLOOR = "floor"
@@ -26,7 +27,8 @@ class Rounding(Enum):
 
 class Params:
     def __init__(self, binary_search: bool, knapsack_binary_search: bool, linear_search: bool,
-                 knapsack_pruning: bool, rounding: Rounding, binary_search_iterations: int, no_jit: bool):
+                 knapsack_pruning: bool, rounding: Rounding, binary_search_iterations: int, no_jit: bool,
+                 gas_limit: int, soft_memory_limit: int):
         self.linear_search = linear_search
         self.knapsack_binary_search = knapsack_binary_search or self.linear_search
         self.binary_search = binary_search or self.knapsack_binary_search
@@ -34,14 +36,42 @@ class Params:
         self.binary_search_iterations = binary_search_iterations
         self.rounding = rounding
         self.no_jit = no_jit
+        self.gas_limit = gas_limit
+        self.soft_memory_limit = soft_memory_limit
 
         # TODO: implement fast pruning
         # self.fast_pruning = fast_pruning
         # assert not (self.knapsack_pruning and self.fast_pruning), "Two different pruning methods are requested"
 
 
-class Status(Enum):
+# The gas expended by a single memory access
+MEMORY_ACCESS_GAS = 1
 
+
+def sorting_gas_cost(n: int):
+    """
+    Return the gas price for sorting n elements.
+    :param n:
+    """
+    return int(ceil(n * math.log2(n)))
+
+
+def knapsack_gas_cost(n: int, upper_bound):
+    """
+    Return the gas price for solving the knapsack problem.
+    """
+    return int(ceil(2 * (n + 1) * upper_bound))
+
+
+def knapsack_memory_size(n: int, upper_bound):
+    """
+    Return the amount of memory to be allocated by the knapsack solver on the given parameters, in bytes.
+    """
+    # The solver allocates 1 boolean and 1 integer per item of a (n+1) x (upper_bound + 2) matrix.
+    return int(ceil((n + 1) * (upper_bound + 2) * 9))
+
+
+class Status(Enum):
     """Represents the type of the solution returned by a solver."""
 
     OPTIMAL = 1
@@ -54,9 +84,10 @@ class Status(Enum):
     """returned if the solver did not find any solution within the timeout"""
 
 
-def solve(inst: Union[WeightRestriction, WeightQualification], params: Params) -> Tuple[Status, Optional[List[int]]]:
+def solve(inst: Union[WeightRestriction, WeightQualification], params: Params) -> Tuple[Status, List[int], int]:
     """
     Solve the Weight Restriction or Weight Qualification problem.
+    Returns the status of the solution, the solution itself and the gas expended.
     """
 
     if isinstance(inst, WeightQualification):
@@ -67,17 +98,19 @@ def solve(inst: Union[WeightRestriction, WeightQualification], params: Params) -
         raise ValueError(f"Unknown instance type {type(inst)}")
 
 
-def dora(inst: WeightQualification, params: Params) -> Tuple[Status, Optional[List[int]]]:
+def dora(inst: WeightQualification, params: Params) -> Tuple[Status, List[int], int]:
     """
     Solve the Weight Qualification problem.
+    Returns the status of the solution, the solution itself and the gas expended.
     """
 
     return swiper(inst.to_wr(), params)
 
 
-def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
+def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, List[int], int]:
     """
     Solve the Weight Restriction problem.
+    Returns the status of the solution, the solution itself and the gas expended.
     """
 
     assert 1 > inst.tn > inst.tw > 0
@@ -92,31 +125,44 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[Li
         else:
             return _swiper_ceil(inst, params)
     elif params.rounding == Rounding.ALL:
-        status_floor, sol_floor = _swiper_floor(inst, params)
-        status_ceil, sol_ceil = _swiper_ceil(inst, params)
-        if sum(sol_floor) < sum(sol_ceil):
-            return status_floor, sol_floor
+        res_floor = _swiper_floor(inst, params)
+        res_ceil = _swiper_ceil(inst, params)
+        if sum(res_floor[1]) < sum(res_ceil[1]):
+            return res_floor
         else:
-            return status_ceil, sol_ceil
+            return res_ceil
     else:
         raise ValueError(f"Unknown rounding method {params.rounding}")
 
 
-def _swiper_floor(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
+def _swiper_floor(inst: WeightRestriction, params: Params) -> Tuple[Status, List[int], int]:
     return _swiper_impl(inst, params, floor, inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn,
                         params.no_jit)
 
 
-def _swiper_ceil(inst: WeightRestriction, params: Params) -> Tuple[Status, Optional[List[int]]]:
+def _swiper_ceil(inst: WeightRestriction, params: Params) -> Tuple[Status, List[int], int]:
     return _swiper_impl(inst, params, ceil, inst.total_weight / inst.n * (inst.tn - inst.tw) / (1 - inst.tn),
                         params.no_jit)
 
 
-def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) -> Tuple[Status, Optional[List[int]]]:
+def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) -> Tuple[Status, List[int], int]:
     """
     :param rnd: rounding function
     :param x_low: lower bound on the optimal value of X
     """
+
+    gas_budget = params.gas_limit
+
+    def try_charge(gas) -> bool:
+        gas = int(round(gas))
+
+        nonlocal gas_budget
+        if gas_budget < gas:
+            return False
+
+        logging.debug("Charging %s gas. Remaining: %s", gas, gas_budget)
+        gas_budget -= gas
+        return True
 
     if params.binary_search:
         x_high = max(inst.weights)
@@ -125,10 +171,34 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
             x_mid = (x_high + x_low) / 2
             t_mid = [rnd(inst.weights[i] / x_mid) for i in range(inst.n)]
 
+            if not try_charge(sorting_gas_cost(inst.n)):
+                break
+
             if knapsack_upper_bound(inst.weights, t_mid, inst.threshold_weight) < inst.tn * sum(t_mid):
                 x_low = x_mid
             else:
                 x_high = x_mid
+
+    # The best solution found so far
+    t_best = [rnd(inst.weights[i] / x_low) for i in range(inst.n)]
+    sum_t_best = sum(t_best)
+
+    def pruning_gas_cost():
+        return knapsack_gas_cost(inst.n, floor(sum_t_best * inst.tn) + 1)
+
+    def try_run_knapsack(weights, profits, capacity, upper_bound) -> Optional[Tuple[List[int], int]]:
+        if knapsack_memory_size(len(weights), upper_bound) > params.soft_memory_limit:
+            return None
+
+        gas_cost = knapsack_gas_cost(len(weights), upper_bound)
+        # We want to make sure that we have enough gas left to do pruning.
+        if gas_budget < gas_cost + pruning_gas_cost():
+            return None
+
+        charged = try_charge(gas_cost)
+        assert charged
+
+        return knapsack(weights, profits, capacity, upper_bound, no_jit)
 
     # Refine the search using knapsack and binary search
     if params.knapsack_binary_search:
@@ -137,19 +207,20 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
         for _ in range(params.binary_search_iterations):  # TODO: come up with a good stopping condition
             x_mid = (x_high + x_low) / 2
             t_mid = [rnd(inst.weights[i] / x_mid) for i in range(inst.n)]
-            sum_t_x_mid = sum(t_mid)
+            sum_t_mid = sum(t_mid)
 
-            best_threshold_set, best_threshold_set_t = knapsack(inst.weights, t_mid, inst.threshold_weight,
-                                                                upper_bound=floor(sum_t_x_mid * inst.tn) + 1,
-                                                                no_jit=no_jit)
+            knapsack_res = try_run_knapsack(inst.weights, t_mid, inst.threshold_weight,
+                                            upper_bound=floor(sum_t_mid * inst.tn) + 1)
+            if knapsack_res is None:
+                break
+            best_threshold_set, best_threshold_set_t = knapsack_res
 
-            if best_threshold_set_t < inst.tn * sum_t_x_mid:
+            if best_threshold_set_t < inst.tn * sum_t_mid:
                 x_low = x_mid
+                t_best = t_mid
+                sum_t_best = sum_t_mid
             else:
                 x_high = x_mid
-
-    # The best solution found so far
-    t_best = [rnd(inst.weights[i] / x_low) for i in range(inst.n)]
 
     # Finish the search going through the rest of relevant values of X one by one
     if params.linear_search:
@@ -157,12 +228,16 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
         while True:
             sum_t_prime = sum(t_prime)
             holders = [i for i in range(inst.n) if t_prime[i] > 0]
-            best_threshold_set, best_threshold_set_t = knapsack(inst.weights, t_prime, inst.threshold_weight,
-                                                                upper_bound=floor(sum_t_prime * inst.tn) + 1,
-                                                                no_jit=no_jit)
+
+            knapsack_res = try_run_knapsack(inst.weights, t_prime, inst.threshold_weight,
+                                            upper_bound=floor(sum_t_prime * inst.tn) + 1)
+            if knapsack_res is None:
+                break
+            best_threshold_set, best_threshold_set_t = knapsack_res
 
             if best_threshold_set_t < inst.tn * sum_t_prime:
                 t_best = t_prime.copy()
+                sum_t_best = sum_t_prime
 
             if rnd == floor:
                 if all(t_prime[i] == 0 for i in best_threshold_set):
@@ -194,10 +269,12 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
             else:
                 raise ValueError(f"Rounding function not supported by the linear search: {rnd}")
 
-    if params.knapsack_pruning:
+    if (params.knapsack_pruning
+            and knapsack_memory_size(inst.n, floor(sum_t_best * inst.tn) + 1) <= params.soft_memory_limit
+            and try_charge(pruning_gas_cost())):
         t_best = prune(inst, t_best, no_jit)
 
-    return Status.VALID, t_best
+    return Status.VALID, t_best, params.gas_limit - gas_budget
 
 
 def prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) -> List[int]:

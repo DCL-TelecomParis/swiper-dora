@@ -1,4 +1,3 @@
-import functools
 import inspect
 import math
 from fractions import Fraction
@@ -6,11 +5,9 @@ from typing import Union, Tuple, List
 from numba import njit
 import numpy as np
 
-
 overflow_error = ValueError("Integer overflow while converting fractional weights to integers for JIT compilation. "
                             "Use --no-jit to use pure python implementation or --float to use floating point "
                             "arithmetic.")
-
 
 MAX_INT_64 = np.iinfo(np.int64).max
 
@@ -87,7 +84,6 @@ def _knapsack_impl(
         profits: List[int],
         capacity: Union[Fraction, float, int],
         upper_bound: int) -> Tuple[List[int], int]:
-
     total_weight = sum(weights)
     table_parties = [i for i in range(len(weights)) if profits[i] > 0]
     n_holders = len(table_parties)
@@ -187,9 +183,9 @@ def sanity_knapsack(
 
 
 def knapsack_upper_bound(
-    weights: List[Union[Fraction, float, int]],
-    profits: List[int],
-    capacity: Union[Fraction, float, int],
+        weights: List[Union[Fraction, float, int]],
+        profits: List[int],
+        capacity: Union[Fraction, float, int],
 ) -> int:
     """
     Returns an upper bound for the knapsack solution in quasilinear time.
@@ -213,4 +209,3 @@ def knapsack_upper_bound(
             break
 
     return profit
-
