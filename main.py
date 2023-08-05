@@ -141,6 +141,20 @@ def main(argv: List[str]) -> None:
                                 "Must be smaller than the weighted threshold beta_w. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
 
+    wq_parser = subparsers.add_parser("dora", aliases=dora_aliases, parents=[common_parser],
+                                      help="Solve the Weight Qualification problem, i.e., "
+                                           "ensure that any group of parties with more than "
+                                           "beta_w fraction of total weight obtains more than "
+                                           "beta_n fraction of total tickets.")
+    wq_parser.add_argument("--tw", "--beta_w", type=Fraction, required=True,
+                           help="The weighted threshold. Corresponds to beta_w in the paper. "
+                                "Must be greater than the nominal threshold beta_n. "
+                                "Can be fractional (e.g., 0.01 or 5/7).")
+    wq_parser.add_argument("--tn", "--beta_n", type=Fraction, required=True,
+                           help="The nominal threshold. Corresponds to beta_n in the paper. "
+                                "Must be smaller than the weighted threshold beta_w. "
+                                "Can be fractional (e.g., 0.01 or 5/7).")
+
     args = parser.parse_args(argv)
 
     # Set up logging
@@ -237,7 +251,7 @@ def main(argv: List[str]) -> None:
     if args.rounding in ["ceil", "both"]:
         ceil_status, ceil_solution, ceil_gas_usage = solve(inst, Params(
             binary_search=args.speed <= 6,
-            knapsack_pruning=args.speed <= 4,
+            pruning=args.speed <= 4,
             knapsack_binary_search=args.speed <= 2,
             linear_search=args.speed <= 1,
             binary_search_iterations=30,
@@ -246,7 +260,7 @@ def main(argv: List[str]) -> None:
             gas_limit=gas_limit if args.rounding == "ceil" else gas_limit // 2,
             soft_memory_limit=soft_memory_limit,
         ))
-        logger.info("Ceiling solution: %s", sum(ceil_solution))
+        logger.info("Ceiling solution: %s", ceil_solution.sum)
         logger.info("Gas expanded by the ceiling solution: %s", ceil_gas_usage)
 
     floor_status = Status.NONE
@@ -255,7 +269,7 @@ def main(argv: List[str]) -> None:
     if args.rounding in ["floor", "both"]:
         floor_status, floor_solution, floor_gas_usage = solve(inst, Params(
             binary_search=args.speed <= 9,
-            knapsack_pruning=args.speed <= 7,
+            pruning=args.speed <= 7,
             knapsack_binary_search=args.speed <= 5,
             linear_search=args.speed <= 3,
             binary_search_iterations=30,
@@ -264,12 +278,13 @@ def main(argv: List[str]) -> None:
             gas_limit=gas_limit - ceil_gas_usage,
             soft_memory_limit=soft_memory_limit,
         ))
-        logger.info("Floor solution: %s", sum(floor_solution))
+        logger.info("Floor solution: %s", floor_solution.sum)
         logger.info("Gas expanded by the floor solution: %s", floor_gas_usage)
 
-    status, solution_sum, solution = min(
-        (floor_status, sum(floor_solution), floor_solution),
-        (ceil_status, sum(ceil_solution), ceil_solution),
+    status, _, _, solution = min(
+        # 0 and 1 are used as tiebreakers
+        (ceil_status, ceil_solution.sum, 0, ceil_solution),
+        (floor_status, floor_solution.sum, 1, floor_solution),
     )
 
     if status == Status.NONE:
@@ -284,7 +299,7 @@ def main(argv: List[str]) -> None:
 
     assert solution is not None
     logger.info(solution)
-    print(f"Total tickets allocated: {sum(solution)}.")
+    print(f"Total tickets allocated: {solution.sum}.")
     print(f"Total gas expanded: {floor_gas_usage + ceil_gas_usage}")
 
 
