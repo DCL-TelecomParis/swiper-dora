@@ -105,23 +105,23 @@ def solve(inst: Union[WeightRestriction, WeightQualification], params: Params) -
     """
 
     if isinstance(inst, WeightQualification):
-        return dora(inst, params)
+        return wq_solver(inst, params)
     elif isinstance(inst, WeightRestriction):
-        return swiper(inst, params)
+        return wr_solver(inst, params)
     else:
         raise ValueError(f"Unknown instance type {type(inst)}")
 
 
-def dora(inst: WeightQualification, params: Params) -> Tuple[Status, Solution, int]:
+def wq_solver(inst: WeightQualification, params: Params) -> Tuple[Status, Solution, int]:
     """
     Solve the Weight Qualification problem.
     Returns the status of the solution, the solution itself and the gas expended.
     """
 
-    return swiper(inst.to_wr(), params)
+    return wr_solver(inst.to_wr(), params)
 
 
-def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, int]:
+def wr_solver(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, int]:
     """
     Solve the Weight Restriction problem.
     Returns the status of the solution, the solution itself and the gas expended.
@@ -130,17 +130,17 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, i
     assert 1 > inst.tn > inst.tw > 0
 
     if params.rounding == Rounding.FLOOR:
-        return _swiper_floor(inst, params)
+        return _wr_solver_floor(inst, params)
     elif params.rounding == Rounding.CEIL:
-        return _swiper_ceil(inst, params)
+        return _wr_solver_ceil(inst, params)
     elif params.rounding == Rounding.BEST_BOUND:
         if inst.tw < 0.5:
-            return _swiper_floor(inst, params)
+            return _wr_solver_floor(inst, params)
         else:
-            return _swiper_ceil(inst, params)
+            return _wr_solver_ceil(inst, params)
     elif params.rounding == Rounding.ALL:
-        res_floor = _swiper_floor(inst, params)
-        res_ceil = _swiper_ceil(inst, params)
+        res_floor = _wr_solver_floor(inst, params)
+        res_ceil = _wr_solver_ceil(inst, params)
         if res_floor[1].sum < res_ceil[1].sum:
             return res_floor
         else:
@@ -149,17 +149,17 @@ def swiper(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, i
         raise ValueError(f"Unknown rounding method {params.rounding}")
 
 
-def _swiper_floor(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, int]:
-    return _swiper_impl(inst, params, floor, inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn,
-                        params.no_jit)
+def _wr_solver_floor(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, int]:
+    return _wr_solver_impl(inst, params, floor, inst.total_weight / inst.n * (inst.tn - inst.tw) / inst.tn,
+                           params.no_jit)
 
 
-def _swiper_ceil(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, int]:
-    return _swiper_impl(inst, params, ceil, inst.total_weight / inst.n * (inst.tn - inst.tw) / (1 - inst.tn),
-                        params.no_jit)
+def _wr_solver_ceil(inst: WeightRestriction, params: Params) -> Tuple[Status, Solution, int]:
+    return _wr_solver_impl(inst, params, ceil, inst.total_weight / inst.n * (inst.tn - inst.tw) / (1 - inst.tn),
+                           params.no_jit)
 
 
-def _swiper_impl(inst: WeightRestriction, params: Params, rounding, x_low, no_jit) -> Tuple[Status, Solution, int]:
+def _wr_solver_impl(inst: WeightRestriction, params: Params, rounding, x_low, no_jit) -> Tuple[Status, Solution, int]:
     def solution(x):
         return Solution([int(rounding(w / x)) for w in inst.weights])
 
@@ -199,16 +199,16 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rounding, x_low, no_ji
             return None
         if pruning_gas_cost(sol) > gas_budget:
             return None
-        return _swiper_prune(inst, sol, params.no_jit), pruning_gas_cost(sol)
+        return _wr_prune(inst, sol, params.no_jit), pruning_gas_cost(sol)
 
-    return _solver_impl(inst.weights, params, x_low, no_jit,
-                        solution, fast_solution_check, exact_solution_check,
-                        pruning_memory_requirements, pruning_gas_cost, prune)
+    return _general_solver(inst.weights, params, x_low, no_jit,
+                           solution, fast_solution_check, exact_solution_check,
+                           pruning_memory_requirements, pruning_gas_cost, prune)
 
 
-def _solver_impl(weights, params: Params, x_low, no_jit,
-                 solution, fast_solution_check, exact_solution_check,
-                 pruning_memory_requirements, pruning_gas_cost, prune) -> Tuple[Status, Solution, int]:
+def _general_solver(weights, params: Params, x_low, no_jit,
+                    solution, fast_solution_check, exact_solution_check,
+                    pruning_memory_requirements, pruning_gas_cost, prune) -> Tuple[Status, Solution, int]:
     gas_budget = params.gas_limit
 
     def charge(gas):
@@ -280,7 +280,7 @@ def _solver_impl(weights, params: Params, x_low, no_jit,
     return Status.VALID, sol_best, params.gas_limit - gas_budget
 
 
-def _swiper_prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) -> List[int]:
+def _wr_prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) -> List[int]:
     """Return a solution corresponding to the pruned version the input list."""
 
     # The index of the party with the maximum weight
@@ -304,11 +304,11 @@ def _swiper_prune(inst: WeightRestriction, solution: List[int], no_jit: bool = F
 
     # We distribute tickets to the other users until the total number is ceil(best_threshold_set_t / inst.tn),
     # making sure that each user gets at most the number of tickets it got in the solution
-    while sum(pruned) < smallest_greater_integer(best_threshold_set_t / inst.tn):
+    while sum(pruned) < _smallest_greater_integer(best_threshold_set_t / inst.tn):
         # recipients are the users that have fewer tickets than the solution and are not in best_threshold_set
         recipients = [i for i in range(inst.n) if pruned[i] < solution[i] and i not in best_threshold_set]
 
-        tickets_to_distribute = smallest_greater_integer(best_threshold_set_t / inst.tn) - sum(pruned)
+        tickets_to_distribute = _smallest_greater_integer(best_threshold_set_t / inst.tn) - sum(pruned)
 
         if tickets_to_distribute >= len(recipients):
             for i in recipients:
@@ -321,6 +321,6 @@ def _swiper_prune(inst: WeightRestriction, solution: List[int], no_jit: bool = F
     return pruned
 
 
-def smallest_greater_integer(x) -> int:
+def _smallest_greater_integer(x) -> int:
     """Return the smallest integer greater than x."""
     return ceil(x) if x % 1 != 0 else int(x) + 1

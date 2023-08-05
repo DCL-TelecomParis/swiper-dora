@@ -111,8 +111,8 @@ def main(argv: List[str]) -> None:
 
     subparsers = parser.add_subparsers(title="solver", required=True, dest="solver")
 
-    swiper_aliases = ["wp"]
-    wr_parser = subparsers.add_parser("swiper", aliases=swiper_aliases, parents=[common_parser],
+    wr_aliases = ["swiper"]
+    wr_parser = subparsers.add_parser("wr", aliases=wr_aliases, parents=[common_parser],
                                       help="Solve the Weight Restriction problem, i.e., "
                                            "ensure that any group of parties with less than "
                                            "alpha_w fraction of total weight obtains less than "
@@ -126,8 +126,8 @@ def main(argv: List[str]) -> None:
                                 "Must be greater than the weighted threshold alpha_w. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
 
-    dora_aliases = ["wq"]
-    wq_parser = subparsers.add_parser("dora", aliases=dora_aliases, parents=[common_parser],
+    wq_aliases = ["dora"]
+    wq_parser = subparsers.add_parser("wq", aliases=wq_aliases, parents=[common_parser],
                                       help="Solve the Weight Qualification problem, i.e., "
                                            "ensure that any group of parties with more than "
                                            "beta_w fraction of total weight obtains more than "
@@ -141,7 +141,7 @@ def main(argv: List[str]) -> None:
                                 "Must be smaller than the weighted threshold beta_w. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
 
-    wq_parser = subparsers.add_parser("dora", aliases=dora_aliases, parents=[common_parser],
+    wq_parser = subparsers.add_parser("dora", aliases=wq_aliases, parents=[common_parser],
                                       help="Solve the Weight Qualification problem, i.e., "
                                            "ensure that any group of parties with more than "
                                            "beta_w fraction of total weight obtains more than "
@@ -183,15 +183,17 @@ def main(argv: List[str]) -> None:
         numerator_gcd = gcd(w.numerator for w in weights)
         weights = [int(w * denominator_lcm // numerator_gcd) for w in weights]
 
-    if args.solver in swiper_aliases:
-        args.solver = "swiper"
-    elif args.solver in dora_aliases:
-        args.solver = "dora"
+    if args.solver in wr_aliases:
+        args.solver = "wr"
+    elif args.solver in wq_aliases:
+        args.solver = "wq"
 
-    if args.solver == "swiper":
+    if args.solver == "wr":
         inst = WeightRestriction(weights, args.tw, args.tn)
-    else:
+    elif args.solver == "wq":
         inst = WeightQualification(weights, args.tw, args.tn)
+    else:
+        raise ValueError("Unknown solver: {}".format(args.solver))
 
     if args.gas_limit is not None:
         gas_limit = parse_gas_limit(args.gas_limit)
@@ -215,10 +217,13 @@ def main(argv: List[str]) -> None:
             # Compute the amount of gas necessary to do the pruning in the floor rounding.
             # It is important as in the floor rounding approach pruning improves the worst-case bound.
             worst_case_floor_tickets_before_pruning = None
-            if args.solver == "swiper":
+            if args.solver == "wr":
                 worst_case_floor_tickets_before_pruning = inst.n * inst.tn / (inst.tn - inst.tw)
-            else:
+            elif args.solver == "wq":
                 worst_case_floor_tickets_before_pruning = inst.n * (1 - inst.tn) / (inst.tw - inst.tn)
+            else:
+                raise ValueError("Unknown solver: {}".format(args.solver))
+
             assert worst_case_floor_tickets_before_pruning > 0
             worst_case_floor_pruning_knapsack_upper_bound = \
                 math.floor(worst_case_floor_tickets_before_pruning * inst.tn) + 1
