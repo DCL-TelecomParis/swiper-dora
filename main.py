@@ -7,14 +7,9 @@ import sys
 from fractions import Fraction
 from typing import List
 
-from solver import solve, Params, Status, Rounding
-from solver.knapsack import MAX_INT_64, overflow_error
+from solver import solve, Params, Status, Rounding, knapsack_gas_cost, sorting_gas_cost, knapsack_memory_size
 from solver.wr import WeightRestriction
 from solver.wq import WeightQualification
-
-# from kap import kap_solve
-# from kap_instance import ProblemInstance, Status
-# from utils import str_to_fracfloat
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +105,8 @@ def main(argv: List[str]) -> None:
                                help="Set this flag to enable verbose logging.")
     common_parser.add_argument("-vv", "--very-verbose", action="store_true", default=False,
                                help="Set this flag to enable very verbose logging.")
+    common_parser.add_argument("--bsearch-iterations", type=int, default=30, metavar="N",
+                               help="The maximum number of iterations to perform in the binary search. ")
 
     subparsers = parser.add_subparsers(title="solver", required=True, dest="solver")
 
@@ -197,6 +194,40 @@ def main(argv: List[str]) -> None:
     logger.info("Gas limit: %s", gas_limit)
     logger.info("Soft memory limit: %s", soft_memory_limit)
 
+    if args.rounding in ["floor", "both"]:
+        # leave at least half of the gas for the floor rounding
+        if args.speed <= 7:
+            # Compute the amount of gas necessary to do the pruning in the floor rounding.
+            # It is important as in the floor rounding approach pruning improves the worst-case bound.
+            worst_case_floor_tickets_before_pruning = None
+            if args.solver == "swiper":
+                worst_case_floor_tickets_before_pruning = inst.n * inst.tn / (inst.tn - inst.tw)
+            else:
+                worst_case_floor_tickets_before_pruning = inst.n * (1 - inst.tn) / (inst.tw - inst.tn)
+            assert worst_case_floor_tickets_before_pruning > 0
+            worst_case_floor_pruning_knapsack_upper_bound = \
+                math.floor(worst_case_floor_tickets_before_pruning * inst.tn) + 1
+
+            worst_case_floor_pruning_memory_size = knapsack_memory_size(
+                inst.n,
+                worst_case_floor_pruning_knapsack_upper_bound)
+
+            worst_case_floor_binary_search_gas = args.bsearch_iterations * sorting_gas_cost(inst.n)
+            worst_case_floor_pruning_gas = knapsack_gas_cost(
+                inst.n,
+                worst_case_floor_pruning_knapsack_upper_bound)
+
+            floor_recommended_minimum_gas = worst_case_floor_binary_search_gas + worst_case_floor_pruning_gas
+            recommended_minimum_gas = 2 * floor_recommended_minimum_gas
+
+            if soft_memory_limit < worst_case_floor_pruning_memory_size:
+                logger.warning("Recommended soft memory limit for this number of parties, tn, and tw: at least %s.",
+                               worst_case_floor_pruning_memory_size)
+
+            if gas_limit < recommended_minimum_gas:
+                logger.warning("Recommended gas limit for this number of parties, tn, and tw: at least %s.",
+                               recommended_minimum_gas)
+
     ceil_status = Status.NONE
     ceil_solution = []
     ceil_gas_usage = 0
@@ -209,7 +240,7 @@ def main(argv: List[str]) -> None:
             binary_search_iterations=30,
             rounding=Rounding.CEIL,
             no_jit=args.no_jit,
-            gas_limit=gas_limit // 2,
+            gas_limit=gas_limit if args.rounding == "ceil" else gas_limit // 2,
             soft_memory_limit=soft_memory_limit,
         ))
         logger.info("Ceiling solution: %s", sum(ceil_solution))
