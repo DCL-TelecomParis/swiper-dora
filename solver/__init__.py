@@ -39,16 +39,8 @@ class Params:
         self.gas_limit = gas_limit
         self.soft_memory_limit = soft_memory_limit
 
-        # TODO: implement fast pruning
-        # self.fast_pruning = fast_pruning
-        # assert not (self.knapsack_pruning and self.fast_pruning), "Two different pruning methods are requested"
 
-
-# The gas expended by a single memory access
-MEMORY_ACCESS_GAS = 1
-
-
-def sorting_gas_cost(n: int):
+def sorting_gas_cost(n: int) -> int:
     """
     Return the gas price for sorting n elements.
     :param n:
@@ -56,19 +48,24 @@ def sorting_gas_cost(n: int):
     return int(ceil(n * math.log2(n)))
 
 
-def knapsack_gas_cost(n: int, upper_bound):
+def knapsack_gas_cost(n: int, upper_bound: int, return_set: bool) -> int:
     """
     Return the gas price for solving the knapsack problem.
     """
-    return int(ceil(2 * (n + 1) * upper_bound))
+    return n * (upper_bound + 1) * (1 + int(return_set))
 
 
-def knapsack_memory_size(n: int, upper_bound):
+def knapsack_memory_size(n: int, upper_bound: int, return_set: bool) -> int:
     """
     Return the amount of memory to be allocated by the knapsack solver on the given parameters, in bytes.
     """
-    # The solver allocates 1 boolean and 1 integer per item of a (n+1) x (upper_bound + 2) matrix.
-    return int(ceil((n + 1) * (upper_bound + 2) * 9))
+    if return_set:
+        # The solver allocates a table of booleans of size n * (upper_bound + 2) to recover the solution set.
+        return n * (upper_bound + 2)
+    else:
+        # When not returning the set of items in the knapsack solution,
+        # the solver only allocates the amount of memory proportional to the input size, which we neglect.
+        return 0
 
 
 class Status(Enum):
@@ -188,14 +185,24 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
     t_best = [rnd(inst.weights[i] / x_low) for i in range(inst.n)]
     sum_t_best = sum(t_best)
 
-    def pruning_gas_cost():
-        return knapsack_gas_cost(inst.n, floor(sum_t_best * inst.tn) + 1)
+    def pruning_memory_size():
+        if not params.knapsack_pruning:
+            return 0
+        return knapsack_memory_size(inst.n, floor(sum_t_best * inst.tn) + 1, True)
 
-    def try_run_knapsack(weights, profits, capacity, upper_bound) -> Optional[Tuple[List[int], int]]:
-        if knapsack_memory_size(len(weights), upper_bound) > params.soft_memory_limit:
+    def pruning_gas_cost():
+        if not params.knapsack_pruning:
+            return 0
+        if pruning_memory_size() > params.soft_memory_limit:
+            # Cannot run pruning due to the memory constraint
+            return 0
+        return knapsack_gas_cost(inst.n, floor(sum_t_best * inst.tn) + 1, True)
+
+    def try_run_knapsack(weights, profits, capacity, upper_bound, return_set) -> Optional[Tuple[List[int], int]]:
+        if knapsack_memory_size(len(weights), upper_bound, return_set) > params.soft_memory_limit:
             return None
 
-        gas_cost = knapsack_gas_cost(len(weights), upper_bound)
+        gas_cost = knapsack_gas_cost(len(weights), upper_bound, return_set)
         # We want to make sure that we have enough gas left to do pruning.
         if gas_budget < gas_cost + pruning_gas_cost():
             return None
@@ -203,7 +210,7 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
         charged = try_charge(gas_cost)
         assert charged
 
-        return knapsack(weights, profits, capacity, upper_bound, no_jit)
+        return knapsack(weights, profits, capacity, upper_bound, return_set, no_jit)
 
     # Refine the search using knapsack and binary search
     if params.knapsack_binary_search:
@@ -215,12 +222,11 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
             sum_t_mid = sum(t_mid)
 
             knapsack_res = try_run_knapsack(inst.weights, t_mid, inst.threshold_weight,
-                                            upper_bound=floor(sum_t_mid * inst.tn) + 1)
+                                            upper_bound=floor(sum_t_mid * inst.tn) + 1, return_set=False)
             if knapsack_res is None:
                 break
-            best_threshold_set, best_threshold_set_t = knapsack_res
 
-            if best_threshold_set_t < inst.tn * sum_t_mid:
+            if knapsack_res < inst.tn * sum_t_mid:
                 x_low = x_mid
                 t_best = t_mid
                 sum_t_best = sum_t_mid
@@ -235,7 +241,7 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
             holders = [i for i in range(inst.n) if t_prime[i] > 0]
 
             knapsack_res = try_run_knapsack(inst.weights, t_prime, inst.threshold_weight,
-                                            upper_bound=floor(sum_t_prime * inst.tn) + 1)
+                                            upper_bound=floor(sum_t_prime * inst.tn) + 1, return_set=True)
             if knapsack_res is None:
                 break
             best_threshold_set, best_threshold_set_t = knapsack_res
@@ -275,7 +281,7 @@ def _swiper_impl(inst: WeightRestriction, params: Params, rnd, x_low, no_jit) ->
                 raise ValueError(f"Rounding function not supported by the linear search: {rnd}")
 
     if (params.knapsack_pruning
-            and knapsack_memory_size(inst.n, floor(sum_t_best * inst.tn) + 1) <= params.soft_memory_limit
+            and pruning_memory_size() <= params.soft_memory_limit
             and try_charge(pruning_gas_cost())):
         t_best = prune(inst, t_best, no_jit)
 
@@ -294,7 +300,7 @@ def prune(inst: WeightRestriction, solution: List[int], no_jit: bool = False) ->
 
     best_threshold_set, best_threshold_set_t = knapsack(inst.weights, solution, inst.threshold_weight,
                                                         upper_bound=floor(sum(solution) * inst.tn) + 1,
-                                                        no_jit=no_jit)
+                                                        no_jit=no_jit, return_set=True)
 
     if best_threshold_set_t >= inst.tn * sum(solution):
         raise Exception("Solution is not valid")

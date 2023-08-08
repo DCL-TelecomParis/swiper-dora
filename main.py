@@ -8,6 +8,7 @@ from fractions import Fraction
 from typing import List
 
 from solver import solve, Params, Status, Rounding, knapsack_gas_cost, sorting_gas_cost, knapsack_memory_size
+from solver.util import lcm, gcd
 from solver.wr import WeightRestriction
 from solver.wq import WeightQualification
 
@@ -210,12 +211,14 @@ def main(argv: List[str]) -> None:
 
             worst_case_floor_pruning_memory_size = knapsack_memory_size(
                 inst.n,
-                worst_case_floor_pruning_knapsack_upper_bound)
+                worst_case_floor_pruning_knapsack_upper_bound,
+                return_set=True)
 
             worst_case_floor_binary_search_gas = args.bsearch_iterations * sorting_gas_cost(inst.n)
             worst_case_floor_pruning_gas = knapsack_gas_cost(
                 inst.n,
-                worst_case_floor_pruning_knapsack_upper_bound)
+                worst_case_floor_pruning_knapsack_upper_bound,
+                return_set=True)
 
             floor_recommended_minimum_gas = worst_case_floor_binary_search_gas + worst_case_floor_pruning_gas
             recommended_minimum_gas = 2 * floor_recommended_minimum_gas
@@ -283,20 +286,6 @@ def main(argv: List[str]) -> None:
     logger.info(solution)
     print(f"Total tickets allocated: {sum(solution)}.")
     print(f"Total gas expanded: {floor_gas_usage + ceil_gas_usage}")
-
-
-def lcm(xs):
-    res = 1
-    for x in xs:
-        res = res * x // math.gcd(res, x)
-    return res
-
-
-def gcd(xs):
-    res = 0
-    for x in xs:
-        res = math.gcd(res, x)
-    return res
 
 
 if __name__ == '__main__':
