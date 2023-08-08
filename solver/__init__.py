@@ -5,6 +5,7 @@ from math import floor, ceil
 from typing import Tuple, List, Union
 
 from solver.knapsack import knapsack, knapsack_upper_bound
+from solver.ramp import WeightRamp
 from solver.wq import WeightQualification
 from solver.wr import WeightRestriction
 
@@ -182,9 +183,9 @@ def _wr_solver_impl(inst: WeightRestriction, params: Params, rounding, x_low, no
         if gas_cost > gas_budget:
             return None
 
-        profit = knapsack(inst.weights, sol.values, inst.threshold_weight, upper_bound,
-                          return_set=False, no_jit=params.no_jit)
-        return profit < inst.tn * sol.sum, gas_cost
+        best_profit = knapsack(inst.weights, sol.values, inst.threshold_weight, upper_bound,
+                               return_set=False, no_jit=params.no_jit)
+        return best_profit < inst.tn * sol.sum, gas_cost
 
     def pruning_memory_requirements(sol):
         upper_bound = floor(sol.sum * inst.tn) + 1
@@ -200,6 +201,53 @@ def _wr_solver_impl(inst: WeightRestriction, params: Params, rounding, x_low, no
         if pruning_gas_cost(sol) > gas_budget:
             return None
         return _wr_prune(inst, sol, params.no_jit), pruning_gas_cost(sol)
+
+    return _general_solver(inst.weights, params, x_low, no_jit,
+                           solution, fast_solution_check, exact_solution_check,
+                           pruning_memory_requirements, pruning_gas_cost, prune)
+
+
+def _ramp_solver_impl(inst: WeightRamp, params: Params, rounding, x_low, no_jit) -> Tuple[Status, Solution, int]:
+    def solution(x):
+        return Solution([int(rounding(w / x)) for w in inst.weights])
+
+    def fast_solution_check(sol, gas_budget):
+        gas_cost = sorting_gas_cost(inst.n)
+        if gas_budget < gas_cost:
+            return None
+        alpha_upper_bound = knapsack_upper_bound(inst.weights, sol.values, inst.low_threshold_weight)
+        beta_lower_bound = antiknapsack_lower_bound(inst.weights, sol.values, inst.high_threshold_weight)
+        return alpha_upper_bound < beta_lower_bound, gas_cost
+
+    def exact_solution_check(sol, gas_budget):
+        # This is the max value up to which care to solve knapsack.
+        upper_bound = floor(sol.sum * inst.tn) + 1
+
+        memory_size = knapsack_memory_size(inst.n, upper_bound)
+        if memory_size > params.soft_memory_limit:
+            return None
+
+        gas_cost = knapsack_gas_cost(inst.n, upper_bound)
+        if gas_cost > gas_budget:
+            return None
+
+        best_profit = knapsack(inst.weights, sol.values, inst.threshold_weight, upper_bound, params.no_jit)
+        return best_profit < inst.tn * sol.sum, gas_cost
+
+    # def pruning_memory_requirements(sol):
+    #     upper_bound = floor(sol.sum * inst.tn) + 1
+    #     return knapsack_memory_size(inst.n, upper_bound, return_set=True)
+    #
+    # def pruning_gas_cost(sol):
+    #     upper_bound = floor(sol.sum * inst.tn) + 1
+    #     return knapsack_gas_cost(inst.n, upper_bound, return_set=True)
+    #
+    # def prune(sol, gas_budget):
+    #     if pruning_memory_requirements(sol) > params.soft_memory_limit:
+    #         return None
+    #     if pruning_gas_cost(sol) > gas_budget:
+    #         return None
+    #     return _wr_prune(inst, sol, params.no_jit), pruning_gas_cost(sol)
 
     return _general_solver(inst.weights, params, x_low, no_jit,
                            solution, fast_solution_check, exact_solution_check,
