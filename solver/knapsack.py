@@ -1,4 +1,3 @@
-import inspect
 import logging
 from fractions import Fraction
 from typing import Union, Tuple, List, Optional
@@ -20,7 +19,7 @@ def knapsack(
         capacity: Union[Fraction, float, int],
         upper_bound: int,
         return_set: bool,
-        no_jit: bool) -> Union[Tuple[List[int], int], int]:
+        no_jit: bool) -> Tuple[List[int], int]:
     """
     Solves the given knapsack instance up to the given upper bound on profit.
     Finds the set of items with the highest profit that fits into the knapsack of the given capacity if its profit
@@ -28,7 +27,7 @@ def knapsack(
     Otherwise, finds any set of items that fits into the knapsack and has profit greater than upper_bound.
 
     If return_set is True, returns the set of items and its profit or upper_bound + 1 if it exceeds the upper bound.
-    Otherwise, returns only the profit.
+    Otherwise, returns None instead of the set of items.
 
     Running time: O(len(weights) * upper_bound).
     Memory usage: O(len(weights)) if return_set is False, O(len(weights) * upper_bound) otherwise.
@@ -38,17 +37,19 @@ def knapsack(
     """
     assert len(weights) > 0
 
+    # If the upper bound is fractional, rounding it down does not affect the result because
+    # the profits are integers.
+    upper_bound = int(upper_bound)
+
     if no_jit:
-        res = _knapsack_impl(weights, profits, capacity, upper_bound, return_set)
-        return res if return_set else res[1]
+        return _knapsack_impl(weights, profits, capacity, upper_bound, return_set)
 
     if isinstance(weights[0], float):
         assert isinstance(capacity, float)
 
         # Call the JIT-compiled function
-        res = _knapsack_jit_float(np.array(weights, dtype=np.float64), np.array(profits, dtype=np.int64),
-                                  capacity, upper_bound, return_set)
-        return res if return_set else res[1]
+        return _knapsack_jit_float(np.array(weights, dtype=np.float64), np.array(profits, dtype=np.int64),
+                                   capacity, upper_bound, return_set)
 
     if isinstance(weights[0], int):
         # Capacity may be a fraction. However, rounding it down does not affect the result.
@@ -57,13 +58,11 @@ def knapsack(
         # Make sure that all integers fit into 64 bits to avoid overflows
         if sum(weights) > MAX_INT_64 or sum(profits) > MAX_INT_64 or capacity > MAX_INT_64:
             logging.warning(overflow_warning)
-            res = _knapsack_impl(weights, profits, capacity, upper_bound, return_set)
-            return res if return_set else res[1]
+            return _knapsack_impl(weights, profits, capacity, upper_bound, return_set)
 
         # Call the JIT-compiled function
-        res = _knapsack_jit_int(np.array(weights, dtype=np.int64), np.array(profits, dtype=np.int64),
-                                capacity, upper_bound, return_set)
-        return res if return_set else res[1]
+        return _knapsack_jit_int(np.array(weights, dtype=np.int64), np.array(profits, dtype=np.int64),
+                                 capacity, upper_bound, return_set)
 
     if isinstance(weights[0], Fraction):
         assert isinstance(capacity, Fraction)
@@ -79,7 +78,6 @@ def knapsack(
 
 @register_jitable
 def _knapsack_impl(weights, profits, capacity, upper_bound, return_set) -> Tuple[Optional[List[int]], int]:
-
     assert len(weights) == len(profits)
 
     # If any item has profit greater than the upper bound, just return it.
@@ -207,4 +205,4 @@ def knapsack_upper_bound(
             profit += profits[party] * (capacity / weights[party])
             break
 
-    return profit
+    return int(profit)

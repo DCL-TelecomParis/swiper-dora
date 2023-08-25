@@ -2,10 +2,10 @@ from fractions import Fraction
 from typing import List, Union
 
 from solver.wr import WeightRestriction
+from solver.general_solver import Solution
 
 
 class WeightQualification:
-
     """Represents an instance of the Weight Qualification problem."""
 
     def __init__(self,
@@ -43,4 +43,5 @@ class WeightQualification:
     def to_wr(self):
         return WeightRestriction(self.weights, 1 - self.tw, 1 - self.tn)
 
-
+    def check_solution(self, sol: Solution, no_jit: bool) -> bool:
+        return self.to_wr().check_solution(sol, no_jit)

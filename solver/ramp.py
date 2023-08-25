@@ -1,7 +1,9 @@
 from fractions import Fraction
 from typing import List, Union
 
-from solver.wr import WeightRestriction
+from solver.general_solver import Solution
+from solver.knapsack import knapsack
+from solver.antiknapsack import antiknapsack
 
 
 class WeightRamp:
@@ -37,3 +39,10 @@ class WeightRamp:
 
     def __repr__(self):
         return str(self)
+
+    def check_solution(self, sol: Solution, no_jit: bool) -> bool:
+        _, alpha_t = knapsack(self.weights, sol.values, self.low_threshold_weight,
+                              upper_bound=self.beta_w * sol.sum + 1, return_set=False, no_jit=no_jit)
+        _, beta_t = antiknapsack(self.weights, sol.values, self.high_threshold_weight,
+                                 lower_bound=self.alpha_w * sol.sum, return_set=False, no_jit=no_jit)
+        return alpha_t < beta_t

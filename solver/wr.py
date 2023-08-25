@@ -1,9 +1,11 @@
 from fractions import Fraction
 from typing import List, Union
 
+from solver.general_solver import Solution
+from solver.knapsack import knapsack
+
 
 class WeightRestriction:
-
     """Represents an instance of the Weight Restriction problem."""
 
     def __init__(self,
@@ -37,3 +39,8 @@ class WeightRestriction:
 
     def __repr__(self):
         return str(self)
+
+    def check_solution(self, sol: Solution, no_jit: bool) -> bool:
+        _, alpha_t = knapsack(self.weights, sol.values, self.threshold_weight,
+                              upper_bound=self.tn * sol.sum + 1, return_set=False, no_jit=no_jit)
+        return alpha_t < self.tn * sol.sum

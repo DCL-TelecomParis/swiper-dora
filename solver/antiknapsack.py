@@ -5,7 +5,7 @@ It can be trivially reduced to knapsack by searching for the complement of the s
 """
 
 from fractions import Fraction
-from typing import List, Union
+from typing import List, Union, Tuple
 
 from solver.knapsack import knapsack_upper_bound, knapsack
 
@@ -15,11 +15,20 @@ def antiknapsack(
         profits: List[int],
         capacity: Union[Fraction, float, int],
         lower_bound: int,
+        return_set: bool,
         no_jit: bool) -> Tuple[List[int], int]:
     profits_sum = sum(profits)
-    best_complement, best_complement_profit = knapsack(weights, profits, sum(weights) - capacity, profits_sum - lower_bound, no_jit)
-    best_complement = set(best_complement)
-    return [i for i in range(len(weights)) if i not in best_complement], profits_sum - best_complement_profit
+    best_complement, best_complement_profit = knapsack(weights, profits, capacity=sum(weights) - capacity,
+                                                       upper_bound=profits_sum - lower_bound,
+                                                       return_set=return_set, no_jit=no_jit)
+
+    worst_set = None
+    if return_set:
+        best_complement = set(best_complement)
+        worst_set = [i for i in range(len(weights)) if i not in best_complement]
+
+    worst_profit = profits_sum - best_complement_profit
+    return worst_set, worst_profit
 
 
 def antiknapsack_lower_bound(

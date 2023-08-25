@@ -7,10 +7,12 @@ import sys
 from fractions import Fraction
 from typing import List
 
-from solver import solve, Params, Status, Rounding, knapsack_gas_cost, sorting_gas_cost, knapsack_memory_size
+from solver.general_solver import Params, Rounding, Status, knapsack_gas_cost, sorting_gas_cost, knapsack_memory_size
 from solver.util import lcm, gcd
 from solver.wr import WeightRestriction
 from solver.wq import WeightQualification
+from solver.ramp import WeightRamp
+from solver import solve
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +109,9 @@ def main(argv: List[str]) -> None:
     common_parser.add_argument("-vv", "--very-verbose", action="store_true", default=False,
                                help="Set this flag to enable very verbose logging.")
     common_parser.add_argument("--bsearch-iterations", type=int, default=30, metavar="N",
-                               help="The maximum number of iterations to perform in the binary search. ")
+                               help="The maximum number of iterations to perform in the binary search.")
+    common_parser.add_argument("--check", action="store_true", default=False,
+                               help="Whether to check the validity of the solution after running the solver.")
 
     subparsers = parser.add_subparsers(title="solver", required=True, dest="solver")
 
@@ -117,11 +121,11 @@ def main(argv: List[str]) -> None:
                                            "ensure that any group of parties with less than "
                                            "alpha_w fraction of total weight obtains less than "
                                            "alpha_n fraction of total tickets.")
-    wr_parser.add_argument("--tw", "--alpha_w", type=Fraction, required=True,
+    wr_parser.add_argument("--alpha_w", "--tw", type=Fraction, required=True,
                            help="The weighted threshold. Corresponds to alpha_w in the paper. "
                                 "Must be smaller than the nominal threshold alpha_n. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
-    wr_parser.add_argument("--tn", "--alpha_n", type=Fraction, required=True,
+    wr_parser.add_argument("--alpha_n", "--tn", type=Fraction, required=True,
                            help="The nominal threshold. Corresponds to alpha_n in the paper. "
                                 "Must be greater than the weighted threshold alpha_w. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
@@ -132,28 +136,28 @@ def main(argv: List[str]) -> None:
                                            "ensure that any group of parties with more than "
                                            "beta_w fraction of total weight obtains more than "
                                            "beta_n fraction of total tickets.")
-    wq_parser.add_argument("--tw", "--beta_w", type=Fraction, required=True,
+    wq_parser.add_argument("--beta_w", "--tw", type=Fraction, required=True,
                            help="The weighted threshold. Corresponds to beta_w in the paper. "
                                 "Must be greater than the nominal threshold beta_n. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
-    wq_parser.add_argument("--tn", "--beta_n", type=Fraction, required=True,
+    wq_parser.add_argument("--beta_n", "--tn", type=Fraction, required=True,
                            help="The nominal threshold. Corresponds to beta_n in the paper. "
                                 "Must be smaller than the weighted threshold beta_w. "
                                 "Can be fractional (e.g., 0.01 or 5/7).")
 
-    wq_parser = subparsers.add_parser("dora", aliases=wq_aliases, parents=[common_parser],
-                                      help="Solve the Weight Qualification problem, i.e., "
-                                           "ensure that any group of parties with more than "
-                                           "beta_w fraction of total weight obtains more than "
-                                           "beta_n fraction of total tickets.")
-    wq_parser.add_argument("--tw", "--beta_w", type=Fraction, required=True,
-                           help="The weighted threshold. Corresponds to beta_w in the paper. "
-                                "Must be greater than the nominal threshold beta_n. "
-                                "Can be fractional (e.g., 0.01 or 5/7).")
-    wq_parser.add_argument("--tn", "--beta_n", type=Fraction, required=True,
-                           help="The nominal threshold. Corresponds to beta_n in the paper. "
-                                "Must be smaller than the weighted threshold beta_w. "
-                                "Can be fractional (e.g., 0.01 or 5/7).")
+    ramp_aliases = []
+    ramp_parser = subparsers.add_parser("ramp", aliases=ramp_aliases, parents=[common_parser],
+                                        help="Solve the Weight Ramp problem, i.e., "
+                                             "ensure that any group of parties with more than "
+                                             "beta_w fraction of total weight obtains more tickets "
+                                             "than any group of parties with less than alpha_n "
+                                             "fraction of total weight.")
+    ramp_parser.add_argument("--alpha_w", type=Fraction, required=True,
+                             help="Must be lower than beta_w. "
+                                  "Can be fractional (e.g., 0.01 or 5/7).")
+    ramp_parser.add_argument("--beta_w", type=Fraction, required=True,
+                             help="Must be greater than alpha_w. "
+                                  "Can be fractional (e.g., 0.01 or 5/7).")
 
     args = parser.parse_args(argv)
 
@@ -169,17 +173,15 @@ def main(argv: List[str]) -> None:
 
     weights = parse_input(args.input_file.read())
 
-    # Help the IDE determine the types
-    args.tw = Fraction(args.tw)
-    args.tn = Fraction(args.tn)
+    threshold_names = [name for name in ("alpha_w", "alpha_n", "beta_w", "beta_n") if hasattr(args, name)]
 
     if args.float:
-        args.tw = float(args.tw)
-        args.tn = float(args.tn)
+        for name in threshold_names:
+            setattr(args, name, float(getattr(args, name)))
         weights = [float(w) for w in weights]
     else:
         # Convert weights to integers
-        denominator_lcm = lcm(w.denominator for w in weights + [args.tw, args.tn])
+        denominator_lcm = lcm(w.denominator for w in weights + [getattr(args, name) for name in threshold_names])
         numerator_gcd = gcd(w.numerator for w in weights)
         weights = [int(w * denominator_lcm // numerator_gcd) for w in weights]
 
@@ -187,11 +189,15 @@ def main(argv: List[str]) -> None:
         args.solver = "wr"
     elif args.solver in wq_aliases:
         args.solver = "wq"
+    elif args.solver in ramp_aliases:
+        args.solver = "ramp"
 
     if args.solver == "wr":
-        inst = WeightRestriction(weights, args.tw, args.tn)
+        inst = WeightRestriction(weights, args.alpha_w, args.alpha_n)
     elif args.solver == "wq":
-        inst = WeightQualification(weights, args.tw, args.tn)
+        inst = WeightQualification(weights, args.beta_w, args.beta_n)
+    elif args.solver == "ramp":
+        inst = WeightRamp(weights, args.alpha_w, args.beta_w)
     else:
         raise ValueError("Unknown solver: {}".format(args.solver))
 
@@ -207,48 +213,10 @@ def main(argv: List[str]) -> None:
 
     logger.info("Problem: %s", inst)
     logger.info("Total weight: %s", inst.total_weight)
-    logger.info("Threshold weight: %s", inst.threshold_weight)
+    if hasattr(inst, "threshold_weight"):
+        logger.info("Threshold weight: %s", inst.threshold_weight)
     logger.info("Gas limit: %s", gas_limit)
     logger.info("Soft memory limit: %s", soft_memory_limit)
-
-    if args.rounding in ["floor", "both"]:
-        # leave at least half of the gas for the floor rounding
-        if args.speed <= 7:
-            # Compute the amount of gas necessary to do the pruning in the floor rounding.
-            # It is important as in the floor rounding approach pruning improves the worst-case bound.
-            worst_case_floor_tickets_before_pruning = None
-            if args.solver == "wr":
-                worst_case_floor_tickets_before_pruning = inst.n * inst.tn / (inst.tn - inst.tw)
-            elif args.solver == "wq":
-                worst_case_floor_tickets_before_pruning = inst.n * (1 - inst.tn) / (inst.tw - inst.tn)
-            else:
-                raise ValueError("Unknown solver: {}".format(args.solver))
-
-            assert worst_case_floor_tickets_before_pruning > 0
-            worst_case_floor_pruning_knapsack_upper_bound = \
-                math.floor(worst_case_floor_tickets_before_pruning * inst.tn) + 1
-
-            worst_case_floor_pruning_memory_size = knapsack_memory_size(
-                inst.n,
-                worst_case_floor_pruning_knapsack_upper_bound,
-                return_set=True)
-
-            worst_case_floor_binary_search_gas = args.bsearch_iterations * sorting_gas_cost(inst.n)
-            worst_case_floor_pruning_gas = knapsack_gas_cost(
-                inst.n,
-                worst_case_floor_pruning_knapsack_upper_bound,
-                return_set=True)
-
-            floor_recommended_minimum_gas = worst_case_floor_binary_search_gas + worst_case_floor_pruning_gas
-            recommended_minimum_gas = 2 * floor_recommended_minimum_gas
-
-            if soft_memory_limit < worst_case_floor_pruning_memory_size:
-                logger.warning("Recommended soft memory limit for this number of parties, tn, and tw: at least %s.",
-                               worst_case_floor_pruning_memory_size)
-
-            if gas_limit < recommended_minimum_gas:
-                logger.warning("Recommended gas limit for this number of parties, tn, and tw: at least %s.",
-                               recommended_minimum_gas)
 
     ceil_status = Status.NONE
     ceil_solution = []
@@ -306,6 +274,9 @@ def main(argv: List[str]) -> None:
     logger.info(solution)
     print(f"Total tickets allocated: {solution.sum}.")
     print(f"Total gas expanded: {floor_gas_usage + ceil_gas_usage}")
+
+    if args.check:
+        inst.check_solution(solution, args.no_jit)
 
 
 if __name__ == '__main__':
